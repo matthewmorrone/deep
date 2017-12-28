@@ -1,0 +1,232 @@
+<html>
+<head>
+<title></title>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<link rel="shortcut icon" type="image/x-icon" href="http://www.matthewmorrone.com/psi.ico" />
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.0.0-alpha1/jquery.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery-color/2.1.2/jquery.color.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/3.10.1/lodash.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/meyer-reset/2.0/reset.min.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.0.0-alpha/css/bootstrap.min.css" />
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.6.0/css/font-awesome.min.css" />
+<script>
+var log = console.log.bind(console)
+</script>
+<style>
+* {
+	margin: 0px;
+	padding: 0px;
+}
+body {
+	width: 100%;
+	height: 100%;
+}
+table, th, td {
+	border: 1px solid black;
+	border-collapse: collapse;
+}
+#colors {
+	margin-top: 100px;
+}
+.color {
+	font-size: 5em;
+	border: 1px solid #cccccc;
+	width: 50%;
+	margin: auto;
+	text-align: center;
+}
+</style>
+</head>
+<body>
+<script src="https://unpkg.com/deeplearn"></script>
+<script>
+
+let Array1D = deeplearn.Array1D
+let CostReduction = deeplearn.CostReduction
+let InCPUMemoryShuffledInputProviderBuilder = deeplearn.InCPUMemoryShuffledInputProviderBuilder
+let Graph = deeplearn.Graph
+let Session = deeplearn.Session
+let SGDOptimizer = deeplearn.SGDOptimizer
+let NDArrayMathGPU = deeplearn.NDArrayMathGPU
+
+
+const math = new NDArrayMathGPU();
+
+const ITERATIONS = 50;
+const TRAINING_SET_SIZE = 1500;
+const TEST_SET_SIZE = 10;
+
+
+
+
+
+class ColorAccessibilityModel {
+	constructor() {
+		this.batchSize = 300;
+		this.initialLearningRate = 0.06;
+
+		this.optimizer = new SGDOptimizer(this.initialLearningRate);
+	}
+	setupSession(trainingSet) {
+		const graph = new Graph();
+
+		this.inputTensor = graph.placeholder('input RGB value', [3]);
+		this.targetTensor = graph.placeholder('output classifier', [2]);
+
+
+
+
+		let connectedLayer = this.createConnectedLayer(graph, this.inputTensor,	0, 64);
+			connectedLayer = this.createConnectedLayer(graph, connectedLayer,	1, 32);
+			connectedLayer = this.createConnectedLayer(graph, connectedLayer,	2, 16);
+
+		this.predictionTensor = this.createConnectedLayer(graph, connectedLayer, 3, 2);
+		this.costTensor = graph.meanSquaredCost(this.targetTensor, this.predictionTensor);
+
+		this.session = new Session(graph, math);
+
+		this.prepareTrainingSet(trainingSet);
+
+	}
+	createConnectedLayer(
+		graph,
+		inputLayer,
+		layerIndex,
+		units,
+		activationFunction
+	) {
+		return graph.layers.dense(
+			`fully_connected_${layerIndex}`,
+			inputLayer,
+			units,
+			activationFunction ? activationFunction : (x) => graph.relu(x)
+		)
+	}
+	prepareTrainingSet(trainingSet) {
+		math.scope(() => {
+			const { rawInputs, rawTargets } = trainingSet;
+
+			const inputArray = rawInputs.map(v => Array1D.new(this.normalizeColor(v)));
+			const targetArray = rawTargets.map(v => Array1D.new(v));
+
+			const shuffledInputProviderBuilder = new InCPUMemoryShuffledInputProviderBuilder([
+				inputArray,
+				targetArray
+			]);
+
+			const [
+				inputProvider,
+				targetProvider,
+			] = shuffledInputProviderBuilder.getInputProviders();
+
+			this.feedEntries = [
+				{tensor: this.inputTensor,	data: inputProvider},
+				{tensor: this.targetTensor, data: targetProvider},
+			];
+		});
+	}
+	normalizeColor(rgb) {
+		return rgb.map(v => v / 255);
+	}
+	train(step, computeCost) {
+
+		let learningRate = this.initialLearningRate * Math.pow(0.90, Math.floor(step / 50));
+		this.optimizer.setLearningRate(learningRate);
+
+		let costValue;
+		math.scope(() => {
+			const cost = this.session.train(
+				this.costTensor,
+				this.feedEntries,
+				this.batchSize,
+				this.optimizer,
+				computeCost ? CostReduction.MEAN : CostReduction.NONE,
+			);
+		});
+	}
+	predict(rgb) {
+		let classifier = [];
+
+		math.scope(() => {
+			const mapping = [{
+				tensor: this.inputTensor,
+				data: Array1D.new(this.normalizeColor(rgb)),
+			}];
+
+			classifier = this.session.eval(this.predictionTensor, mapping).getValues();
+		});
+
+		return [...classifier];
+	}
+}
+
+
+function getAccessibleColor(rgb) {
+	let [r, g, b] = rgb;
+
+	let color = [r / 255, g / 255, b / 255];
+
+	let c = color.map((col) => {
+		if (col <= 0.03928) {
+			return col / 12.92;
+		}
+		return Math.pow((col + 0.055) / 1.055, 2.4);
+	});
+
+	let L = (0.2126 * c[0]) + (0.7152 * c[1]) + (0.0722 * c[2]);
+
+	return (L > 0.179)
+		 ? [0, 1]	// black
+		 : [1, 0]; // white
+}
+function getAccessibleColorName(v) {
+	return v[0] === 0 ? 'black' : 'white'
+}
+function generateRandomRgbColors(m) {
+	const rawInputs = [];
+	for (let i = 0; i < m; i++) {
+		rawInputs.push(generateRandomRgbColor());
+	}
+	return rawInputs;
+}
+function generateRandomRgbColor() {
+	return [
+		randomIntFromInterval(0, 255),
+		randomIntFromInterval(0, 255),
+		randomIntFromInterval(0, 255),
+	];
+}
+function randomIntFromInterval(min, max) {
+	return Math.floor(Math.random() * (max - min + 1) + min);
+}
+function generateColorSet(m) {
+	const rawInputs = generateRandomRgbColors(m);
+	const rawTargets = rawInputs.map(getAccessibleColor);
+
+	return { rawInputs, rawTargets };
+}
+function normalizeColor(rgb) {
+	return rgb.map(v => v / 255);
+}
+$(function() {
+	let n = 5
+	let colorSet = generateColorSet(n)
+	for (let i = 0; i < n; i++) {
+		let color = colorSet.rawInputs[i]
+		$("#colors").append($(`<div class=color>${color}</div>`).css({
+			backgroundColor: color,
+			color: getAccessibleColorName(getAccessibleColor(color))
+		}))
+	}
+})
+
+
+
+
+
+</script>
+<div id='root'></div>
+<div id='colors'></div>
+</body>
+</html>

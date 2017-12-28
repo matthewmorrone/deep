@@ -1,0 +1,224 @@
+<html>
+<head>
+<title>Linear Regression</title>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<link rel="shortcut icon" type="image/x-icon" href="http://www.matthewmorrone.com/psi.ico" />
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.0.0-alpha1/jquery.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery-color/2.1.2/jquery.color.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/3.10.1/lodash.min.js"></script>
+<!-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/meyer-reset/2.0/reset.min.css" /> -->
+<!-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.0.0-alpha/css/bootstrap.min.css" /> -->
+<!-- <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.6.0/css/font-awesome.min.css" /> -->
+<script>
+let log = console.log.bind(console)
+</script>
+<style>
+#chart {
+  margin: auto;
+  width: 60%;
+  margin-top: 50px;
+}
+#descent {
+  position: absolute;
+  top: 0px;
+  left: 1400px;
+}
+</style>
+</head>
+<body>
+<script src="https://unpkg.com/deeplearn"></script>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<div id="chart"></div>
+<div id="graph"></div>
+<input id='alpha'  type='number' value='0.01' />
+<button id='pause'>Play</button>
+<button id='next'>Next</button>
+<input id='theta0' type='number' />
+<input id='theta1' type='number' />
+<input id='cost'   type='number' />
+<div id='descent'></div>
+<script>
+
+d3 = Plotly.d3
+pause = true
+
+
+function random(min, max) {
+  if (!max) {
+    max = min
+    min = 0
+  }
+  return Math.floor(Math.random()*max)+min
+}
+function range(data) {
+  return {
+    min: Math.min(...data),
+    max: Math.max(...data),
+  }
+}
+
+let descent = [], guess = 200
+
+async function loadData() {
+
+  let lines = await $.get('ex1data2.txt')
+  lines = lines.trim().split('\n').map(line => line.split(',').map(cell => Number.parseInt(cell, 10)))
+  lines = lines[0].map((col, i) => lines.map(row => row[i]));
+
+  // Plotly.d3.csv('ex1data2.txt', function(res) {console.log(res)})
+
+  let xrange = range(lines[0])
+  let yrange = range(lines[2])
+
+  let theta0 = random(guess)
+  let theta1 = random(guess)
+
+  $('#theta0').val(theta0)
+  $('#theta1').val(theta1)
+
+  // y = theta0 + theta1*x
+
+  let x1 = xrange.min, y1 = theta0 + theta1 * x1
+  let x2 = xrange.max, y2 = theta0 + theta1 * x2
+
+  let cost = 0
+
+
+  let data = [{
+    x: [x1, x2],
+    y: [y1, y2],
+    mode: 'lines',
+  },{
+    x: lines[0],
+    y: lines[2],
+    mode: 'markers',
+    type: 'scatter',
+    marker: {
+      size: lines[1].map(s=>s*3+5),
+    },
+  }];
+  for(let i = 0; i < lines[0].length-1; i++) {
+    let error = lines[0][i]*theta1+theta0 - lines[2][i]
+    data.push({
+      x: [lines[0][i]+0, lines[0][i]+0],
+      y: [lines[2][i]+0, lines[0][i]*theta1+theta0],
+      mode: 'lines',
+      text: Math.round(error),
+    })
+    cost += Math.pow(error, 2)
+  }
+  $('#cost').val(cost*(1/(2*data.length)))
+
+  descent.push([theta0, theta1, cost])
+  $("#descent").prepend(`<br><span>`+theta0.toFixed(2)+" "+theta1.toFixed(2)+" "+cost+"</span>")
+
+
+  let layout = {
+    title: 'Oregon Housing Prices',
+    showlegend: false,
+    width: 1000,
+    height: 700,
+    xaxis: {
+      title: 'Floor Space (ft<sup>2</sup>)',
+      rangemode: 'tozero',
+      hoverformat: 'd',
+    },
+    yaxis: {
+      title: 'Price (100k $)',
+      rangemode: 'tozero',
+      hoverformat: 'd',
+    },
+    sliders: [{
+      pad: {l: 130, t: 55},
+      currentvalue: {
+        visible: true,
+        xanchor: 'right',
+        font: {size: 20, color: '#666'}
+      }
+    }]
+  };
+  let options = {
+    editable: false,
+    displayModeBar: false,
+    displaylogo: false,
+    autosize: false,
+    // staticPlot: true,
+  }
+  Plotly.newPlot('chart', data, layout, options);
+
+  function update(theta0, theta1) {
+    let cost = 0
+    let y1 = theta0 + theta1 * x1
+    let y2 = theta0 + theta1 * x2
+
+    data[0].y = [y1, y2]
+    for(let i = 2; i < data.length; i++) {
+      data[i].y[1] = data[i].x[1]*theta1+theta0
+      let error = data[i].y[1] - data[i].y[0]
+      cost += Math.pow(error, 2)
+    }
+    cost *= (1/(2*data.length))
+    Plotly.animate('chart', {
+      data: data
+    }, {
+      transition: {
+        duration: 250,
+        easing: 'cubic-in-out'
+      }
+    })
+
+    return cost
+  }
+  let alpha = 0.01 //Number.parseInt($('#alpha').val(), 10)
+  $('#next').click(function() {
+
+    let cost = update(theta0, theta1), converge = Infinity, color
+    descent.push([theta0, theta1, cost])
+
+    if (descent.length === 1) {
+      theta0 += random(-10, 10)
+      theta1 += random(-10, 10)
+    }
+    if (descent.length > 1) {
+      if (descent[descent.length-2][2] < descent[descent.length-1][2]) {
+        color = 'red'
+        theta0 *= (1-alpha)
+        theta1 *= (1-alpha)
+      }
+      if (descent[descent.length-2][2] > descent[descent.length-1][2]) {
+        color = 'green'
+        theta0 *= (1+alpha)
+        theta1 *= (1+alpha)
+      }
+    }
+    $('#theta0').val(theta0)
+    $('#theta1').val(theta1)
+    $('#cost').val(cost)
+    $("#descent").prepend(`<br><span style="color: ${color};">`+theta0.toFixed(2)+" "+theta1.toFixed(2)+" "+cost.toFixed(2)+"</span>")
+  })
+
+  var interval = setInterval(() => {
+    if (pause) return
+
+    $('#next').click()
+
+  }, 250)
+
+  $('#pause').click(function() {
+    pause = !pause
+    pause ? $(this).text("Play") : $(this).text("Pause")
+  })
+  $('#theta0').blur(function() {
+    theta0 = $(this).val()
+    update(theta0, theta1)
+  })
+  $('#theta1').blur(function() {
+    theta1 = $(this).val()
+    update($('#theta0').val(), $('#theta1').val())
+  })
+}
+loadData()
+</script>
+</body>
+</html>
